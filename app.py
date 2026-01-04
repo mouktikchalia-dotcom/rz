@@ -353,9 +353,30 @@ def check_card():
         if not checker.load_checkout_and_extract_token():
             return jsonify({'description': 'Failed to extract session token', 'Status': 'declined'}), 500
 
+        # Step 4: Submit Payment
         payment_response = checker.submit_payment(card_number, exp_month, exp_year, cvv, email, phone)
-        status_response = checker.check_status()
-        result = format_response(payment_response, status_response)
+        
+        # Step 5: Capture result BEFORE cancelling
+        # Check for direct success
+        if isinstance(payment_response, dict) and 'razorpay_payment_id' in payment_response:
+             result = {'description': 'Payment successful', 'Status': 'approved'}
+        
+        # Check for 3DS / OTP Requirement
+        elif isinstance(payment_response, dict) and 'next' in payment_response:
+             result = {'description': '3D Secure or OTP required', 'Status': '3ds'}
+        
+        # Check for specific decline errors in the body
+        elif isinstance(payment_response, dict) and 'error' in payment_response:
+             error_desc = payment_response.get('error', {}).get('description', 'Card Declined')
+             result = {'description': error_desc, 'Status': 'declined'}
+        
+        else:
+             # Fallback to the status check if Step 4 was unclear
+             status_response = checker.check_status()
+             result = format_response(payment_response, status_response)
+
+        # Optional: Cancel the payment now that we have our result to avoid duplicate charges
+        checker.check_status()
 
         logger.info(f"\n{'━'*60}")
         logger.info(f"RESULT: {result['Status']}")
